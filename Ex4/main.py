@@ -16,7 +16,7 @@ while True:
     random_string = generate_random_string(5)
     rhash = sha1_hash(random_string)
     xd = dicto.get(rhash.split("$")[3][:12])
-    print(random_string)
+    
     if xd is not None and xd != random_string:
         print(rhash)
         print("Found it! " + random_string)
