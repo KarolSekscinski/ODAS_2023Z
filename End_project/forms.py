@@ -6,6 +6,7 @@ from flask_ckeditor import CKEditorField
 
 # WTForm for creating a notes
 class CreateNoteForm(FlaskForm):
+    title = StringField("Note Title", validators=[DataRequired()])
     body = CKEditorField("Blog Content", validators=[DataRequired()])
     submit = SubmitField("Submit Post")
 
