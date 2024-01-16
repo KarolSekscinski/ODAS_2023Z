@@ -5,12 +5,13 @@ from datetime import date
 from flask import Flask, abort, render_template, redirect, url_for, flash
 from flask_bootstrap import Bootstrap5
 from flask_ckeditor import CKEditor
-from flask_gravatar import Gravatar
 from flask_login import UserMixin, login_user, LoginManager, current_user, logout_user
 from flask_sqlalchemy import SQLAlchemy
 from functools import wraps
 from sqlalchemy.orm import relationship
 from forms import LoginForm, RegisterForm, CreateNoteForm
+
+SPECIAL_CHARS = "!@#$%^&*()_+-=[]{}|;':,./<>?`~"
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = "206363ef77d567cc511df5098695d2b85058952afd5e2b1eecd5aed981805e60"
@@ -27,18 +28,31 @@ def load_user(user_id):
     return db.get_or_404(User, user_id)
 
 
+def note_author_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        note_id = kwargs['note_id']
+        note = db.get_or_404(Note, note_id)
+        if note.author != current_user:
+            abort(403)
+        return f(*args, **kwargs)
+    return decorated_function
 
 
+def check_password_strength(password):
+    """Check the strength of a password"""
+    if len(password) < 8:
+        return False
+    if not any(char.isdigit() for char in password):
+        return False
+    if not any(char.isupper() for char in password):
+        return False
+    if not any(char.islower() for char in password):
+        return False
+    if not any(char in SPECIAL_CHARS for char in password):
+        return False
+    return True
 
-# # For adding profile images to the notes section
-# gravatar = Gravatar(app,
-#                     size=100,
-#                     rating='g',
-#                     default='retro',
-#                     force_default=False,
-#                     force_lower=False,
-#                     use_ssl=False,
-#                     base_url=None)
 
 # Connect to DB
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sqlite3.db'
@@ -55,6 +69,8 @@ class Note(db.Model):
     title = db.Column(db.String(250), nullable=False)
     date = db.Column(db.String(250), nullable=False)
     body = db.Column(db.Text, nullable=False)
+    encrypted = db.Column(db.Boolean, nullable=False)
+    password = db.Column(db.String(250), nullable=True)
 
 
 class User(UserMixin, db.Model):
@@ -67,6 +83,7 @@ class User(UserMixin, db.Model):
     # This will act like a list of Notes objects attached to each user.
     # The "author" refers to the author property in the Note class
     notes = relationship("Note", back_populates="author")
+
 
 with app.app_context():
     db.create_all()
@@ -84,8 +101,13 @@ def register():
             # User already exists
             flash("You've already signed up with that email, log in instead!")
             return redirect(url_for('login'))
-
-        salt_and_hash_password = hash_password(form.password.data, salt_length=8).split("$")
+        # if password is too weak
+        plaintext_password = form.password.data
+        if not check_password_strength(plaintext_password):
+            flash("Password is too weak, please try again.")
+            return redirect(url_for('register'))
+        # Hash the password
+        salt_and_hash_password = hash_password(plaintext_password, salt_length=8).split("$")
         new_user = User(
             email=form.email.data,
             name=form.name.data,
@@ -137,8 +159,12 @@ def get_all_notes():
     return render_template("index.html", all_notes=notes, current_user=current_user)
 
 
-@app.route("/new_post", methods=['GET', 'POST'])
+@app.route("/new_note", methods=['GET', 'POST'])
 def add_new_note():
+    if not current_user.is_authenticated:
+        flash("You need to login to access this page.")
+        return redirect(url_for('login'))
+    
     form = CreateNoteForm()
     if form.validate_on_submit():
         new_note = Note(
@@ -159,6 +185,31 @@ def show_note(note_id):
     requested_note = db.get_or_404(Note, note_id)
 
     return render_template("note.html", note=requested_note, current_user=current_user)
+
+
+@app.route('/note/<int:note_id>/edit', methods=['GET', 'POST'])
+@note_author_required
+def edit_note(note_id):
+    note = db.get_or_404(Note, note_id)
+    form = CreateNoteForm(
+        title=note.title,
+        body=note.body
+    )
+    if form.validate_on_submit():
+        note.title = form.title.data
+        note.body = form.body.data
+        db.session.commit()
+        return redirect(url_for("show_note", note_id=note.id))
+    return render_template("make-note.html", form=form, current_user=current_user)
+
+
+@app.route('/note/<int:note_id>/delete', methods=['GET', 'POST'])
+@note_author_required
+def delete_note(note_id):
+    note = db.get_or_404(Note, note_id)
+    db.session.delete(note)
+    db.session.commit()
+    return redirect(url_for("get_all_notes"))
 
 
 def generate_salt(length):
