@@ -1,6 +1,6 @@
 from flask_wtf import FlaskForm
-from wtforms import StringField, SubmitField, PasswordField, BooleanField, ValidationError
-from wtforms.validators import DataRequired, Email, Length, EqualTo, InputRequired
+from wtforms import StringField, SubmitField, PasswordField, BooleanField
+from wtforms.validators import DataRequired, Length, EqualTo, InputRequired, Regexp
 from flask_ckeditor import CKEditorField
 
 import markdown
@@ -8,10 +8,13 @@ import bleach
 
 allowed_tags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'a', 'strong', 'em', 'ul', 'ol', 'li', 'blockquote', 'img']
 allowed_attributes = {'a': ['href', 'title'], 'img': ['src', 'alt', 'title'], 'p': ['style']}
+special_characters = ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=', '{', '}', '[', ']',
+                       '|', '\\', ':', ';', ',', '.', '?', '/', '~', '_', '#']
 
 def clean_html(html):
     """Clean html tags using bleach"""
     return bleach.clean(html, tags=allowed_tags, attributes=allowed_attributes, strip=True)
+
 
 class CleanMarkdownField(CKEditorField):
     def process_formdata(self, valuelist):
@@ -21,29 +24,34 @@ class CleanMarkdownField(CKEditorField):
             self.data = ''
 
 
-
-
-
-
-
-
-
 # WTForm for creating a notes
 class CreateNoteForm(FlaskForm):
     title = StringField("Note Title", validators=[DataRequired()])
     body = CleanMarkdownField("Note Content", validators=[DataRequired()])
     encrypted = BooleanField("Encrypt Note")
-    password = PasswordField("Password For Encryption")
+    password = PasswordField("Password For Encryption",
+                             validators=[Length(min=0, max=16, message="Password must be 16 characters long.", )])
     submit = SubmitField("Submit Note")
 
-# Once user clicked encrypted check box, the password field will appear
+
+# WTForm for decrypting a note
+class PasswordForm(FlaskForm):
+    password = PasswordField("Password For Decryption",
+                             validators=[InputRequired(),
+                                         Length(min=16, max=16, message="Password must be 8 characters long.")])
+    submit = SubmitField("Submit Password")
+
 
 # Create a form to register new users
+# Password must contain at least one uppercase letter, one lowercase letter, one number and one special character.
 class RegisterForm(FlaskForm):
-    email = StringField("Email", validators=[DataRequired()])
-    password = PasswordField("Password", validators=[DataRequired()])
+    email = StringField("Email", validators=[DataRequired(), Length(min=5, max=100),])
+    password = PasswordField("Password", validators=[DataRequired(),
+                                                     Regexp(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[rA-Za-z\d@$!%*?&]{8,16}$",
+                                                            message="Password must contain at least one uppercase letter, one lowercase letter, one number and one special character."),
+                                                     Length(min=8, max=16, message="Password must be at least characters long.")])
     password2 = PasswordField("Confirm Password", validators=[DataRequired(), EqualTo("password")])
-    name = StringField("Name", validators=[DataRequired()])
+    name = StringField("Name", validators=[DataRequired(), Length(min=3, max=100)])
     submit = SubmitField("Sign Me Up!")
 
 

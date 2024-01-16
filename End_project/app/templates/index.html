@@ -1,6 +1,5 @@
 {% include "header.html" %}
 
-<!-- Page Header-->
 <header
   class="masthead"
   style="background-image: url('../static/assets/img/home-bg.jpg')"
@@ -16,11 +15,11 @@
     </div>
   </div>
 </header>
-<!-- Main Content-->
+
 <div class="container px-4 px-lg-5">
   <div class="row gx-4 gx-lg-5 justify-content-center">
     <div class="col-md-10 col-lg-8 col-xl-7">
-       <!-- New Note -->     
+
       <div class="d-flex justify-content-end mb-4">
         <a
           class="btn btn-primary float-right"
@@ -28,7 +27,7 @@
           >Create New Note</a
         >
       </div>
-      <!-- Note preview-->
+
       {% for note in all_notes %}
       <div class="note-preview">
         <a href="{{ url_for('show_note', note_id=note.id) }}">
@@ -36,24 +35,21 @@
         </a>
         <p class="note-meta">
           Noted by
-          <!-- note.author.name is now a User object -->
-          <a href="#">{{note.author.name}}</a>
+
+          <a>{{note.author.name}}</a>
           on {{note.date}}
-          <!-- Only show delete button if user id is 1 (admin user) -->
-         {% if current_user.id == note.author.id: %}
+
+         {% if current_user.id == note.author.id %}
           <a href="{{url_for('delete_note', note_id=note.id) }}">✘</a>
           <a href="{{url_for('edit_note', note_id=note.id) }}">✎</a>
          {% endif %}
         </p>
       </div>
-      <!-- Divider-->
+
       <hr class="my-4" />
       {% endfor %}
 
-      <!-- Pager-->
-      <div class="d-flex justify-content-end mb-4">
-        <a class="btn btn-secondary text-uppercase" href="#!">Older Notes →</a>
-      </div>
+
     </div>
   </div>
 </div>

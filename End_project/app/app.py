@@ -9,7 +9,11 @@ from flask_login import UserMixin, login_user, LoginManager, current_user, logou
 from flask_sqlalchemy import SQLAlchemy
 from functools import wraps
 from sqlalchemy.orm import relationship
-from forms import LoginForm, RegisterForm, CreateNoteForm
+from forms import LoginForm, RegisterForm, CreateNoteForm, PasswordForm
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from encryption import encrypt, decrypt
+import time
 
 SPECIAL_CHARS = "!@#$%^&*()_+-=[]{}|;':,./<>?`~"
 
@@ -17,10 +21,25 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = "206363ef77d567cc511df5098695d2b85058952afd5e2b1eecd5aed981805e60"
 ckeditor = CKEditor(app)
 Bootstrap5(app)
+limiter = Limiter(get_remote_address, app=app, default_limits=["200 per day", "50 per hour"])
+# remote address is the IP address of the user accessing the website.
+# default_limits is a list of rules that apply to all routes.
 
 # Configure Flask-Login
 login_manager = LoginManager()
 login_manager.init_app(app)
+
+# TODO: Create a decorator to monitor system
+def monitor_system(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        message = f"{time.ctime()}: Request made by {get_remote_address()}"
+        if current_user.is_authenticated:
+            print(f"{message}: by {current_user.email}\n")
+        else:
+            print(f"{message}: by anonymous user. \n")
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 @login_manager.user_loader
@@ -37,21 +56,6 @@ def note_author_required(f):
             abort(403)
         return f(*args, **kwargs)
     return decorated_function
-
-
-def check_password_strength(password):
-    """Check the strength of a password"""
-    if len(password) < 8:
-        return False
-    if not any(char.isdigit() for char in password):
-        return False
-    if not any(char.isupper() for char in password):
-        return False
-    if not any(char.islower() for char in password):
-        return False
-    if not any(char in SPECIAL_CHARS for char in password):
-        return False
-    return True
 
 
 # Connect to DB
@@ -71,6 +75,7 @@ class Note(db.Model):
     body = db.Column(db.Text, nullable=False)
     encrypted = db.Column(db.Boolean, nullable=False)
     password = db.Column(db.String(250), nullable=True)
+    iv = db.Column(db.String(250), nullable=True)
 
 
 class User(UserMixin, db.Model):
@@ -91,6 +96,8 @@ with app.app_context():
 
 # Register new users into the User Table
 @app.route('/register', methods=['GET', 'POST'])
+@limiter.limit("5/minute")
+@monitor_system
 def register():
     form = RegisterForm()
     if form.validate_on_submit():
@@ -101,12 +108,7 @@ def register():
             # User already exists
             flash("You've already signed up with that email, log in instead!")
             return redirect(url_for('login'))
-        # if password is too weak
         plaintext_password = form.password.data
-        if not check_password_strength(plaintext_password):
-            flash("Password is too weak, please try again.")
-            return redirect(url_for('register'))
-        # Hash the password
         salt_and_hash_password = hash_password(plaintext_password, salt_length=8).split("$")
         new_user = User(
             email=form.email.data,
@@ -123,20 +125,24 @@ def register():
 
 
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("5/minute")
+@monitor_system
 def login():
     form = LoginForm()
     if form.validate_on_submit():
         password = form.password.data
         result = db.session.execute(db.select(User).where(User.email == form.email.data))
         # email in db is unique so will only have one result.
+
         user = result.scalar()
-        salt = user.salt
-        # Email doesn't exist
+
+        # User doesn't exist
         if not user:
-            flash("That email doesn't exist, please try again.")
+            flash("User with this credentials doesn't exist, please try again.")
             return redirect(url_for('login'))
+        salt = user.salt
         # Password incorrect
-        elif user.password != hash_password(plaintext=password, init_salt=salt).split("$")[1]:
+        if user.password != hash_password(plaintext=password, init_salt=salt).split("$")[1]:
             flash('Password incorrect, please try again.')
             return redirect(url_for('login'))
         else:
@@ -153,6 +159,7 @@ def logout():
 
 
 @app.route('/')
+@limiter.limit("30/minute")
 def get_all_notes():
     result = db.session.execute(db.select(Note))
     notes = result.scalars().all()
@@ -167,12 +174,27 @@ def add_new_note():
     
     form = CreateNoteForm()
     if form.validate_on_submit():
-        new_note = Note(
-            title=form.title.data,
-            body=form.body.data,
-            author=current_user,
-            date=date.today().strftime("%B %d, %Y")
-        )
+        if form.encrypted.data:
+            encrypted_note, iv = encrypt(form.body.data, form.password.data)
+
+            new_note = Note(
+                title=form.title.data,
+                body=encrypted_note,
+                author=current_user,
+                date=date.today().strftime("%B %d, %Y"),
+                encrypted=form.encrypted.data,
+                password=form.password.data,
+                iv=iv,
+            )
+        else:
+            new_note = Note(
+                title=form.title.data,
+                body=form.body.data,
+                author=current_user,
+                date=date.today().strftime("%B %d, %Y"),
+                encrypted=form.encrypted.data,
+
+            )
         db.session.add(new_note)
         db.session.commit()
         
@@ -181,8 +203,25 @@ def add_new_note():
 
 
 @app.route('/note/<int:note_id>', methods=['GET', 'POST'])
+@monitor_system
 def show_note(note_id):
     requested_note = db.get_or_404(Note, note_id)
+    # Show encrypted note body but add a form to provide password to decrypt
+    if requested_note.encrypted:
+        form = PasswordForm()
+        if form.validate_on_submit():
+
+            if form.password.data == requested_note.password:
+                decrypted_note = decrypt(requested_note.body, requested_note.iv, requested_note.password)
+
+                requested_note.body = decrypted_note
+                requested_note.encrypted = False
+
+                return render_template("note.html", note=requested_note, current_user=current_user, form=form)
+            else:
+                flash("Incorrect password, please try again.")
+                return redirect(url_for("show_note", note_id=note_id))
+
 
     return render_template("note.html", note=requested_note, current_user=current_user)
 
@@ -193,8 +232,11 @@ def edit_note(note_id):
     note = db.get_or_404(Note, note_id)
     form = CreateNoteForm(
         title=note.title,
-        body=note.body
+        body=note.body,
+        encrypted=note.encrypted,
+        password=note.password,
     )
+
     if form.validate_on_submit():
         note.title = form.title.data
         note.body = form.body.data
