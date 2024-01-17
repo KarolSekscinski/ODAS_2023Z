@@ -2,6 +2,7 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, SubmitField, PasswordField, BooleanField
 from wtforms.validators import DataRequired, Length, EqualTo, InputRequired, Regexp
 from flask_ckeditor import CKEditorField
+import math
 
 import markdown
 import bleach
@@ -9,7 +10,8 @@ import bleach
 allowed_tags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'a', 'strong', 'em', 'ul', 'ol', 'li', 'blockquote', 'img']
 allowed_attributes = {'a': ['href', 'title'], 'img': ['src', 'alt', 'title'], 'p': ['style']}
 special_characters = ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=', '{', '}', '[', ']',
-                       '|', '\\', ':', ';', ',', '.', '?', '/', '~', '_', '#']
+                      '|', '\\', ':', ';', ',', '.', '?', '/', '~', '_', '#']
+
 
 def clean_html(html):
     """Clean html tags using bleach"""
@@ -44,12 +46,18 @@ class PasswordForm(FlaskForm):
 
 # Create a form to register new users
 # Password must contain at least one uppercase letter, one lowercase letter, one number and one special character.
+# with this requirement, entropy of passwords would be .
 class RegisterForm(FlaskForm):
-    email = StringField("Email", validators=[DataRequired(), Length(min=5, max=100),])
+    email = StringField("Email", validators=[DataRequired(), Length(min=5, max=100), ])
     password = PasswordField("Password", validators=[DataRequired(),
-                                                     Regexp(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[rA-Za-z\d@$!%*?&]{8,16}$",
-                                                            message="Password must contain at least one uppercase letter, one lowercase letter, one number and one special character."),
-                                                     Length(min=8, max=16, message="Password must be at least characters long.")])
+                                                     Regexp(
+                                                         r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])["
+                                                         r"rA-Za-z\d@$!%*?&]{8,16}$",
+                                                         message="Password must contain at least one uppercase "
+                                                                 "letter, one lowercase letter, one number and one "
+                                                                 "special character."),
+                                                     Length(min=8, max=16,
+                                                            message="Password must be 8-16 characters long.")])
     password2 = PasswordField("Confirm Password", validators=[DataRequired(), EqualTo("password")])
     name = StringField("Name", validators=[DataRequired(), Length(min=3, max=100)])
     submit = SubmitField("Sign Me Up!")
@@ -60,3 +68,9 @@ class LoginForm(FlaskForm):
     email = StringField("Email", validators=[DataRequired()])
     password = PasswordField("Password", validators=[DataRequired()])
     submit = SubmitField("Let Me In!")
+
+
+# Create a form to use TOTP
+class TOTPForm(FlaskForm):
+    token = StringField("Token", validators=[DataRequired()])
+    submit = SubmitField("Submit Token")
