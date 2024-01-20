@@ -9,6 +9,8 @@ from functools import wraps
 # Implementing TOTP
 import pyotp
 import qrcode
+
+# Flask imports
 from flask import Flask, abort, render_template, redirect, url_for, flash, request
 from flask_bootstrap import Bootstrap5
 from flask_ckeditor import CKEditor
@@ -18,11 +20,15 @@ from flask_login import UserMixin, login_user, LoginManager, current_user, logou
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import relationship
 
+
+# Local imports
 from encryption import encrypt, decrypt
 from forms import LoginForm, RegisterForm, CreateNoteForm, PasswordForm, TOTPForm
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = "206363ef77d567cc511df5098695d2b85058952afd5e2b1eecd5aed981805e60"
+
+
 ckeditor = CKEditor(app)
 Bootstrap5(app)
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per day", "50 per hour"])
@@ -35,7 +41,6 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 
 
-# TODO: Create a decorator to monitor system
 def monitor_system(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -82,6 +87,7 @@ class Note(db.Model):
     body = db.Column(db.Text, nullable=False)
     encrypted = db.Column(db.Boolean, nullable=False)
     password = db.Column(db.String(250), nullable=True)
+    salt = db.Column(db.String(250), nullable=True)
     iv = db.Column(db.String(250), nullable=True)
 
 
@@ -221,13 +227,16 @@ def add_new_note():
             else:
                 encrypted_note, iv = encrypt(form.body.data, form.password.data)
 
+            salt_and_password = hash_password(form.password.data, salt_length=8).split("$")
+
             new_note = Note(
                 title=form.title.data,
                 body=encrypted_note,
                 author=current_user,
                 date=date.today().strftime("%B %d, %Y"),
                 encrypted=form.encrypted.data,
-                password=form.password.data,
+                password=salt_and_password[1],
+                salt=salt_and_password[0],
                 iv=iv,
             )
         else:
@@ -247,14 +256,17 @@ def add_new_note():
 
 @app.route('/note/<int:note_id>', methods=['GET', 'POST'])
 @monitor_system
+@login_required
 def show_note(note_id):
     requested_note = db.get_or_404(Note, note_id)
     # Show encrypted note body but add a form to provide password to decrypt
     if requested_note.encrypted:
         form = PasswordForm()
         if form.validate_on_submit():
-            if form.password.data == requested_note.password:
-                decrypted_note = decrypt(requested_note.body, requested_note.iv, requested_note.password)
+            user = current_user
+
+            if hash_password(plaintext=form.password.data, init_salt=user.salt).split("$")[1] == requested_note.password:
+                decrypted_note = decrypt(requested_note.body, requested_note.iv, form.password.data)
 
                 requested_note.body = decrypted_note
                 requested_note.encrypted = False

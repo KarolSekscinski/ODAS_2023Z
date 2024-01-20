@@ -3,6 +3,13 @@
 <body>
 
     <div class="container">
+        {% with messages = get_flashed_messages() %}
+              {% if messages %}
+              {% for message in messages %}
+              <p class="flash">{{ message }}</p>
+              {% endfor %}
+              {% endif %}
+              {% endwith %}
 
 
         <h2>Steps to Set up Google Authenticator</h2>
