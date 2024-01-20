@@ -253,7 +253,6 @@ def show_note(note_id):
     if requested_note.encrypted:
         form = PasswordForm()
         if form.validate_on_submit():
-
             if form.password.data == requested_note.password:
                 decrypted_note = decrypt(requested_note.body, requested_note.iv, requested_note.password)
 
@@ -267,25 +266,6 @@ def show_note(note_id):
         return render_template("note.html", note=requested_note, current_user=current_user, form=form)
 
     return render_template("note.html", note=requested_note, current_user=current_user)
-
-
-@app.route('/note/<int:note_id>/edit', methods=['GET', 'POST'])
-@note_author_required
-def edit_note(note_id):
-    note = db.get_or_404(Note, note_id)
-    form = CreateNoteForm(
-        title=note.title,
-        body=note.body,
-        encrypted=note.encrypted,
-        password=note.password,
-    )
-
-    if form.validate_on_submit():
-        note.title = form.title.data
-        note.body = form.body.data
-        db.session.commit()
-        return redirect(url_for("show_note", note_id=note.id))
-    return render_template("make-note.html", form=form, current_user=current_user)
 
 
 @app.route('/note/<int:note_id>/delete', methods=['GET', 'POST'])

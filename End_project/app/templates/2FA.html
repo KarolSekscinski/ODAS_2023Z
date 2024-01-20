@@ -5,12 +5,12 @@
     <div class="container">
 
 
-        <h2>Steps to Setup Google Authenticator</h2>
+        <h2>Steps to Set up Google Authenticator</h2>
 
         <ol>
-            <li>Download the App from Playstore/AppStore.</li>
+            <li>Download the App from Playstore/App Store.</li>
             <li>Follow the initial setup procedure till a blank screen is reached.</li>
-            <li>Tap on the + sign at the lower right corner and select the Scan a QR Code Option.</li>
+            <li>Tap on the + sign in the lower right corner and select the Scan a QR Code Option.</li>
             <li>Scan the generated QR code.</li>
             <li>Now, a new account in the following format will be added with a TOTP which is valid for 30 seconds.</li>
         </ol>
@@ -18,9 +18,9 @@
         <h3>Scan the QR Code</h3>
         <img src="{{ url_for('static', filename='qr.png') }}" alt="QR Code">
 
-        <h3>Enter the 6 digit code from your Google Authenticator App</h3>
+        <h3>Enter the 6-digit code from your Google Authenticator App</h3>
         {{  render_form(form) }}
     </div>
 
 </body>
-</html>
+
