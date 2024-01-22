@@ -1,79 +1,55 @@
-import hashlib
-import os
 import random
 import string
-import time
 from datetime import date
 from functools import wraps
+import hashlib
+import time
+import base64
+from io import BytesIO
 
-# Implementing TOTP
-import pyotp
-import qrcode
+from flask import (
+    Flask,
+    render_template,
+    redirect,
+    url_for,
+    flash,
+    abort
+)
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import (
+    LoginManager,
+    login_user,
+    current_user,
+    login_required,
+    logout_user,
+    UserMixin,
 
-# Flask imports
-from flask import Flask, abort, render_template, redirect, url_for, flash, request
+)
 from flask_bootstrap import Bootstrap5
 from flask_ckeditor import CKEditor
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from flask_login import UserMixin, login_user, LoginManager, current_user, logout_user, login_required
-from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import relationship
 
+import pyotp
+import qrcode
 
-# Local imports
-from encryption import encrypt, decrypt
-from forms import LoginForm, RegisterForm, CreateNoteForm, PasswordForm, TOTPForm
+from .forms import (RegisterForm, LoginForm, CreateNoteForm, PasswordForm, TOTPForm)
+from .encryption import encrypt, decrypt
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = "206363ef77d567cc511df5098695d2b85058952afd5e2b1eecd5aed981805e60"
+app.config.from_object("project.config.Config")
 
+db = SQLAlchemy(app)
 
 ckeditor = CKEditor(app)
 Bootstrap5(app)
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per day", "50 per hour"])
 # remote address is the IP address of the user accessing the website.
 # default_limits is a list of rules that apply to all routes.
-# TODO : add in memory cache to reduce load on database
 
-# Configure Flask-Login
 login_manager = LoginManager()
 login_manager.init_app(app)
-
-
-def monitor_system(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        message = f"{time.ctime()}: Request made by {get_remote_address()}"
-        if current_user.is_authenticated:
-            print(f"{message}: by {current_user.email}\n")
-        else:
-            print(f"{message}: by anonymous user. \n")
-        return f(*args, **kwargs)
-    return decorated_function
-
-
-
-@login_manager.user_loader
-def load_user(user_id):
-    return db.get_or_404(User, user_id)
-
-
-def note_author_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        note_id = kwargs['note_id']
-        note = db.get_or_404(Note, note_id)
-        if note.author != current_user:
-            abort(403)
-        return f(*args, **kwargs)
-    return decorated_function
-
-
-# Connect to DB
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sqlite3.db'
-db = SQLAlchemy()
-db.init_app(app)
 
 
 # Configure Tables
@@ -104,8 +80,33 @@ class User(UserMixin, db.Model):
     notes = relationship("Note", back_populates="author")
 
 
-with app.app_context():
-    db.create_all()
+@login_manager.user_loader
+def load_user(user_id):
+    return db.get_or_404(User, user_id)
+
+
+def monitor_system(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        message = f"{time.ctime()}: Request made by {get_remote_address()}"
+        if current_user.is_authenticated:
+            print(f"{message}: by {current_user.email}\n")
+        else:
+            print(f"{message}: by anonymous user. \n")
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
+def note_author_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        note = db.get_or_404(Note, kwargs.get("note_id"))
+        if current_user != note.author:
+            abort(403)
+        return f(*args, **kwargs)
+
+    return decorated_function
 
 
 # Register new users into the User Table
@@ -113,7 +114,6 @@ with app.app_context():
 @limiter.limit("5/minute")
 @monitor_system
 def register():
-
     register_form = RegisterForm()
     if register_form.validate_on_submit():
         # Check if user email is already present in the database.
@@ -148,7 +148,6 @@ def register():
 @limiter.limit("5/minute")
 @login_required
 def totp():
-
     # To register a new user, we need to generate a secret key and a QR code
     # This secret key will be used to generate OTPs
     # This QR code will be used to register the OTP with an authenticator app
@@ -157,7 +156,6 @@ def totp():
     user = current_user
     if form.validate_on_submit():
         if pyotp.TOTP(user.totp_secret).verify(form.token.data):
-            os.remove("app/static/qr.png")
             return redirect(url_for("get_all_notes"))
         else:
             flash("Incorrect OTP, please try again.")
@@ -165,8 +163,13 @@ def totp():
 
     key = user.totp_secret
     uri = pyotp.totp.TOTP(key).provisioning_uri(name=user.name, issuer_name="Secure Notes App")
-    qr = qrcode.make(uri).save("app/static/qr.png")
-    return render_template("2FA.html", form=form)
+    qr = qrcode.make(uri)
+
+    # Convert the QR code to a base64-encoded string
+    buffered = BytesIO()
+    qr.save(buffered)
+    qr_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    return render_template("2FA.html", form=form, qr_base64=qr_base64)
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -217,7 +220,7 @@ def add_new_note():
     if not current_user.is_authenticated:
         flash("You need to login to access this page.")
         return redirect(url_for('login'))
-    
+
     form = CreateNoteForm()
     if form.validate_on_submit():
         if form.encrypted.data:
@@ -225,7 +228,7 @@ def add_new_note():
                 flash("Please enter a 16 characters password to encrypt your note.")
                 return redirect(url_for("add_new_note"))
             else:
-                encrypted_note, iv = encrypt(form.body.data, form.password.data)
+                encrypted_note, note_iv_str = encrypt(form.body.data, form.password.data)
 
             salt_and_password = hash_password(form.password.data, salt_length=8).split("$")
 
@@ -237,7 +240,7 @@ def add_new_note():
                 encrypted=form.encrypted.data,
                 password=salt_and_password[1],
                 salt=salt_and_password[0],
-                iv=iv,
+                iv=note_iv_str,
             )
         else:
             new_note = Note(
@@ -249,7 +252,7 @@ def add_new_note():
             )
         db.session.add(new_note)
         db.session.commit()
-        
+
         return redirect(url_for("get_all_notes"))
     return render_template("make-note.html", form=form, current_user=current_user)
 
@@ -263,10 +266,11 @@ def show_note(note_id):
     if requested_note.encrypted:
         form = PasswordForm()
         if form.validate_on_submit():
-            user = current_user
+            hashed_password = hash_password(plaintext=form.password.data, init_salt=requested_note.salt).split("$")[1]
+            if hashed_password == requested_note.password:
+                note_iv = requested_note.iv
 
-            if hash_password(plaintext=form.password.data, init_salt=user.salt).split("$")[1] == requested_note.password:
-                decrypted_note = decrypt(requested_note.body, requested_note.iv, form.password.data)
+                decrypted_note = decrypt(requested_note.body, note_iv, form.password.data)
 
                 requested_note.body = decrypted_note
                 requested_note.encrypted = False
@@ -305,7 +309,3 @@ def hash_password(plaintext, salt_length=0, init_salt="", rounds=500):
         sha3 = hashlib.sha3_256(plaintext_bytes).hexdigest()
         salt = sha3
     return init_salt + "$" + salt
-
-
-if __name__ == '__main__':
-    app.run(debug=True, port=5001)

@@ -2,8 +2,6 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, SubmitField, PasswordField, BooleanField
 from wtforms.validators import DataRequired, Length, EqualTo, InputRequired, Regexp
 from flask_ckeditor import CKEditorField
-import math
-
 import markdown
 import bleach
 
@@ -19,6 +17,26 @@ def clean_html(html):
 
 
 class CleanMarkdownField(CKEditorField):
+    def __init__(
+            self,
+            label=None,
+            validators=None,
+            filters=(),
+            description="",
+            id=None,
+            default=None,
+            widget=None,
+            render_kw=None,
+            name=None,
+            _form=None,
+            _prefix="",
+            _translations=None,
+            _meta=None,
+    ):
+        super().__init__(label, validators, filters, description, id, default, widget, render_kw, name, _form, _prefix,
+                         _translations, _meta)
+        self.data = None
+
     def process_formdata(self, valuelist):
         if valuelist:
             self.data = clean_html(markdown.markdown(valuelist[0]))
