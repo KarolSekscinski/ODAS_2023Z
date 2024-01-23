@@ -1,8 +1,5 @@
-import random
-import string
 from datetime import date
 from functools import wraps
-import hashlib
 import time
 import base64
 from io import BytesIO
@@ -36,7 +33,7 @@ import pyotp
 import qrcode
 
 from .forms import (RegisterForm, LoginForm, CreateNoteForm, PasswordForm, TOTPForm)
-from .encryption import encrypt, decrypt
+from .encryption import encrypt, decrypt, hash_password
 
 app = Flask(__name__)
 app.config.from_object("project.config.Config")
@@ -207,6 +204,12 @@ def logout():
 def get_all_notes():
     result = db.session.execute(db.select(Note))
     notes = result.scalars().all()
+    # If user is not author of note, don't show the encrypted notes.
+    if current_user.is_authenticated:
+        notes = [note for note in notes if not note.encrypted or note.author == current_user]
+    else:
+        notes = [note for note in notes if not note.encrypted]
+
     return render_template("index.html", all_notes=notes, current_user=current_user)
 
 
@@ -290,20 +293,20 @@ def delete_note(note_id):
     db.session.commit()
     return redirect(url_for("get_all_notes"))
 
-
-def generate_salt(length):
-    return ''.join(random.choice(string.ascii_letters) for _ in range(length))
-
-
-def hash_password(plaintext, salt_length=0, init_salt="", rounds=500):
-    if init_salt == "":
-        salt = generate_salt(salt_length)
-        init_salt = salt
-    else:
-        salt = init_salt
-    for _ in range(rounds):
-        plaintext_with_salt = salt + plaintext
-        plaintext_bytes = bytes(plaintext_with_salt, 'ascii')
-        sha3 = hashlib.sha3_256(plaintext_bytes).hexdigest()
-        salt = sha3
-    return init_salt + "$" + salt
+#
+# def generate_salt(length):
+#     return ''.join(random.choice(string.ascii_letters) for _ in range(length))
+#
+#
+# def hash_password(plaintext, salt_length=0, init_salt="", rounds=500):
+#     if init_salt == "":
+#         salt = generate_salt(salt_length)
+#         init_salt = salt
+#     else:
+#         salt = init_salt
+#     for _ in range(rounds):
+#         plaintext_with_salt = salt + plaintext
+#         plaintext_bytes = bytes(plaintext_with_salt, 'ascii')
+#         sha3 = hashlib.sha3_256(plaintext_bytes).hexdigest()
+#         salt = sha3
+#     return init_salt + "$" + salt

@@ -1,6 +1,9 @@
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 import os
+import random
+import string
+import hashlib
 
 
 def encrypt(note, password):
@@ -41,3 +44,21 @@ def decrypt(encrypted_note, iv_string, password):
 
     # Return the decrypted note
     return decrypted_note
+
+
+def generate_salt(length):
+    return ''.join(random.choice(string.ascii_letters) for _ in range(length))
+
+
+def hash_password(plaintext, salt_length=0, init_salt="", rounds=500):
+    if init_salt == "":
+        salt = generate_salt(salt_length)
+        init_salt = salt
+    else:
+        salt = init_salt
+    for _ in range(rounds):
+        plaintext_with_salt = salt + plaintext
+        plaintext_bytes = bytes(plaintext_with_salt, 'ascii')
+        sha3 = hashlib.sha3_256(plaintext_bytes).hexdigest()
+        salt = sha3
+    return init_salt + "$" + salt
