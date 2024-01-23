@@ -6,6 +6,7 @@ import hashlib
 import time
 import base64
 from io import BytesIO
+from html import unescape
 
 from flask import (
     Flask,
@@ -137,9 +138,7 @@ def register():
         db.session.add(new_user)
         db.session.commit()
 
-        # This line will authenticate the user with Flask-login
         login_user(new_user)
-        # return redirect(url_for("get_all_notes"))
         return redirect(url_for("totp"))
     return render_template("register.html", form=register_form, current_user=current_user)
 
@@ -148,10 +147,7 @@ def register():
 @limiter.limit("5/minute")
 @login_required
 def totp():
-    # To register a new user, we need to generate a secret key and a QR code
-    # This secret key will be used to generate OTPs
-    # This QR code will be used to register the OTP with an authenticator app
-    # After verifying the OTP, the user will be registered
+
     form = TOTPForm()
     user = current_user
     if form.validate_on_submit():
@@ -165,7 +161,6 @@ def totp():
     uri = pyotp.totp.TOTP(key).provisioning_uri(name=user.name, issuer_name="Secure Notes App")
     qr = qrcode.make(uri)
 
-    # Convert the QR code to a base64-encoded string
     buffered = BytesIO()
     qr.save(buffered)
     qr_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
@@ -274,6 +269,9 @@ def show_note(note_id):
 
                 requested_note.body = decrypted_note
                 requested_note.encrypted = False
+                # Decode HTML entities
+                decoded_html = unescape(requested_note.body)
+                requested_note.body = decoded_html
 
                 return render_template("note.html", note=requested_note, current_user=current_user, form=form)
             else:
